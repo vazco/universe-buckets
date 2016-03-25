@@ -12,6 +12,6 @@ Package.describe({
 
 Package.onUse(function(api) {
   api.versionsFrom('1.2.1');
-  api.use(['universe:ecmascript', 'mongo', 'meteor', 'universe:utilities']);
+  api.use(['universe:ecmascript', 'random', 'mongo', 'meteor', 'universe:utilities']);
   api.addFiles('buckets.js');
 });
