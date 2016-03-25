@@ -7,8 +7,8 @@ class Buckets {
             //publish can be called only on server side!
             delete this.publish;
         }
-        this._storageClass = {};
-        this._storageClass.default = storageClass;
+        this._CollectionClass = {};
+        this._CollectionClass._default_ = storageClass;
         this._collections = {};
         this._connection = connection;
         // this._emitter = new UniUtils.Emitter();
@@ -48,19 +48,34 @@ class Buckets {
         })
     }
 
-    subscribe (bucketName) {
-        const handler = this._connection.subscribe(bucketName);
+    subscribe (bucketName, ...params) {
+        const handler = this._connection.subscribe(bucketName, ...params);
         handler.getCollection = name => this._ensureCollection(bucketName+BUCKET_SEP+name);
         return handler;
     }
 
-    _ensureCollection (name) {
+    prepareSubscription(bucketName, ...params) {
+        const _CollectionClass = {};
+        const scope = Object.assign({}, this);
+        scope._ensureCollection = name => this._ensureCollection.bind(scope, name, _CollectionClass[name]);
+        return {
+            start: this.subscribe.bind(scope, bucketName, ...params),
+            setCollectionClass: (CollectionClass, name = '_default_') =>
+                _CollectionClass[bucketName+BUCKET_SEP+name] = CollectionClass,
+            getCollection: name => scope._ensureCollection(name)
+        }
+    }
+
+    _ensureCollection (name, _CollectionClass) {
         if (!this._collections[name]) {
-            let storageClass = this._storageClass.default;
-            if (this._storageClass[name]) {
-                storageClass = this._storageClass[name];
+            let CollectionClass = this._CollectionClass._default_;
+            if (this._CollectionClass[name]) {
+                CollectionClass = this._CollectionClass[name];
             }
-            this._collections[name] = new storageClass(name, {connection: this._connection});
+            if (_CollectionClass) {
+                CollectionClass = _CollectionClass;
+            }
+            this._collections[name] = new CollectionClass(name, {connection: this._connection});
         }
         return this._collections[name];
     }
