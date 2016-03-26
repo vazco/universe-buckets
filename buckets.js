@@ -60,13 +60,14 @@ class Buckets {
     }
 
     subscribe (bucketName, ...params) {
-        const {callbacks, readyPromise, stopPromise} = addPromisesApi(params);
+        const {callbacks, readyPromise, stopPromise, context} = addPromisesApi(params);
         const handler = this._connection.subscribe(bucketName, ...params, callbacks);
         handler._name = bucketName;
         handler.getCollection = name => this._ensureCollection(bucketName+BUCKET_SEP+name);
         handler.then = readyPromise.then.bind(readyPromise);
         handler.catch = readyPromise.catch.bind(readyPromise);
         addAutoApi(handler, this, stopPromise);
+        context.getHandler = () => _.omit(handler, 'then', 'catch');
         return handler;
     }
 
@@ -101,6 +102,7 @@ class Buckets {
 
 function addPromisesApi (params) {
     let onReady, onStop, callError, callReady, callStop;
+    const context = {};
     if (params.length) {
         var lastParam = params[params.length - 1];
         if (typeof lastParam === 'function') {
@@ -124,16 +126,17 @@ function addPromisesApi (params) {
     return {
         readyPromise,
         stopPromise,
+        context,
         callbacks: {
             onReady () {
-                callReady && callReady();
+                callReady && callReady(context.getHandler());
                 return onReady && onReady.call(this);
             },
             onStop (e) {
                 if (e && callError) {
                     callError(e);
                 } else {
-                    callStop();
+                    callStop(context.getHandler());
                 }
                 return onStop && onStop.call(this, e);
             }
