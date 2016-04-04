@@ -24,15 +24,15 @@ class Buckets {
         if (Meteor.isClient) {
             this._connection.registerStore('__bucket_collections', Object.assign(this._defaultHandlers, {
                 update: ({id}) => {
-                    if (!_collectionsPerBucket[id.split(BUCKET_SEP)[0]]) {
-                        _collectionsPerBucket[id.split(BUCKET_SEP)[0]] = [];
+                    const bucketName = id.split(BUCKET_SEP)[0];
+                    if (!_collectionsPerBucket[bucketName]) {
+                        _collectionsPerBucket[bucketName] = [];
                     }
-                    _collectionsPerBucket[id.split(BUCKET_SEP)[0]].push(this._ensureCollection(id));
+                    const coll = this._ensureCollection(id);
+                    _collectionsPerBucket[bucketName].push(coll);
                 }
             }));
         }
-
-        this._emitters = {};
     }
 
     publish(bucketName, fn, options) {
@@ -88,7 +88,7 @@ class Buckets {
                 }
                 item.forEach(customDoc => {
                     const {_id = index++} = customDoc;
-                    this.added(bucketName, _id , customDoc);
+                    this.added(bucketName, _id, customDoc);
                 })
             });
 
@@ -107,7 +107,6 @@ class Buckets {
         handler.then = readyPromise.then.bind(readyPromise);
         handler.catch = readyPromise.catch.bind(readyPromise);
         addAutoApi(handler, this, stopPromise, bucketName);
-        addEventApi(handler, this, bucketName);
         context.getHandler = () => _.omit(handler, 'then', 'catch');
         return handler;
     }
@@ -118,9 +117,6 @@ class Buckets {
         BucketsScope.prototype = this;
         const _CollectionClass = {};
         let _cacheExpirationTime;
-        let addedFns = [];
-        let changedFns = [];
-        let removedFns = [];
         const result = {
             _name: bucketName,
             start: (...args) => {
@@ -138,30 +134,6 @@ class Buckets {
             setCacheExpirationTime: time => {
                 _cacheExpirationTime = time;
                 return result;
-            },
-            onAdded: callback => {
-                addedFns.push(callback);
-                return result;
-            },
-            onChanged: callback => {
-                changedFns.push(callback);
-                return result;
-            },
-            onRemoved: callback => {
-                removedFns.push(callback);
-                return result;
-            },
-            offAdded: callback => {
-                addedFns = _.without(addedFns, callback);
-                return result;
-            },
-            offChanged: callback => {
-                changedFns = _.without(changedFns, callback);
-                return result;
-            },
-            offRemoved: callback => {
-                removedFns = _.without(removedFns, callback);
-                return result;
             }
         };
         return result;
@@ -175,15 +147,6 @@ class Buckets {
                 CollectionClass = this._CollectionClass[name];
             }
             _collections[name] = new CollectionClass(name, {connection: this._connection});
-            const self = this;
-            const _update = this._connection._stores[name].update;
-            this._connection._stores[name].update = function ({msg, collection, id, fields}) {
-                const [bucketName, collectionName] = collection.split(BUCKET_SEP);
-                if (self._emitters[bucketName]) {
-                    self._emitters[bucketName].emit(msg, collectionName, fields);
-                }
-                return _update.apply(this, arguments);
-            }
         }
         return _collections[name];
     }
@@ -233,49 +196,6 @@ function addPromisesApi(params) {
     }
 }
 
-function addEventApi(handler, scope, bucketName) {
-    handler.onAdded = callback => {
-        if (!scope._emitters[bucketName]) {
-            scope._emitters[bucketName] = new UniUtils.Emitter();
-        }
-        scope._emitters[bucketName].on('added', callback);
-        return this;
-    };
-    handler.onChanged = callback => {
-        if (!scope._emitters[bucketName]) {
-            scope._emitters[bucketName] = new UniUtils.Emitter();
-        }
-        scope._emitters[bucketName].on('changed', callback);
-        return this;
-    };
-    handler.onRemoved = callback => {
-        if (!scope._emitters[bucketName]) {
-            scope._emitters[bucketName] = new UniUtils.Emitter();
-        }
-        scope._emitters[bucketName].on('removed', callback);
-        return this;
-    };
-
-    handler.offAdded = callback => {
-        if (scope._emitters[bucketName]) {
-            scope._emitters[bucketName].off('added', callback);
-        }
-        return this;
-    };
-    handler.offChanged = callback => {
-        if (scope._emitters[bucketName]) {
-            scope._emitters[bucketName].off('changed', callback);
-        }
-        return this;
-    };
-    handler.offRemoved = callback => {
-        if (scope._emitters[bucketName]) {
-            scope._emitters[bucketName].on('removed', callback);
-        }
-        return this;
-    };
-}
-
 function addAutoApi(handler, scope, stopPromise, bucketName) {
     handler.autorun = func => {
         if (!handler._tasks) {
@@ -295,7 +215,6 @@ function addAutoApi(handler, scope, stopPromise, bucketName) {
             if (handler._tasks) {
                 handler._tasks.forEach(task => task.stop());
             }
-            delete scope._emitters[bucketName];
             _stop.apply(this, args);
         }, _cacheExpirationTime);
         return stopPromise;
@@ -385,9 +304,10 @@ class Bucket {
     }
 }
 
-function isCursor (c) {
+function isCursor(c) {
     return c && c._publishCursor;
 }
+
 
 export default Bucket;
 export {Buckets, Bucket};
