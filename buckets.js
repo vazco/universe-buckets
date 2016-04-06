@@ -106,6 +106,15 @@ class Buckets {
         addDocsApi(handler, this, bucketName);
         handler.then = readyPromise.then.bind(readyPromise);
         handler.catch = readyPromise.catch.bind(readyPromise);
+        handler.onStop = onStopCB => {
+            if (typeof onStopCB !== 'function') {
+                throw new Error('Expected function, instead got:'+ (typeof onStopCB));
+            }
+            if (!handler._onStop) {
+                handler._onStop = [];
+            }
+            handler._onStop.push(onStopCB);
+        };
         addAutoApi(handler, this, stopPromise, bucketName);
         context.getHandler = () => _.omit(handler, 'then', 'catch');
         return handler;
@@ -214,6 +223,9 @@ function addAutoApi(handler, scope, stopPromise, bucketName) {
         Meteor.setTimeout(() => {
             if (handler._tasks) {
                 handler._tasks.forEach(task => task.stop());
+            }
+            if (handler._onStop) {
+                handler._onStop.forEach(stopCb => stopCb && stopCb());
             }
             _stop.apply(this, args);
         }, _cacheExpirationTime);
