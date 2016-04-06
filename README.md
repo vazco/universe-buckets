@@ -65,11 +65,13 @@ Of course you can pass some arguments to subscriptions as on Meteor.subscribe/Me
 #### `MyBucket.subscribe(...params)` returns an handler object, which has:
 
 Standard api:
+
 - `.ready()`
 - `.stop()`
 - `.subscriptionId`
 
 Extra api:
+
 - `.then(function(handler){})`
 - `.catch(function(error){})`
 - `.onStop(callback)`
@@ -77,3 +79,7 @@ Extra api:
 - `.getDocs(collectionName = ALL, selector = {}, options = {})`
 - `.getDoc(collectionName = ALL, selector = {}, options = {})`
 - `.getCount(collectionName = ALL, selector = {}, options = {})`
+
+
+### Creation of collections of buckets
+> to be continued soon
