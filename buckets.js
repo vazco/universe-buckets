@@ -22,14 +22,19 @@ class Buckets {
             'retrieveOriginals', 'getDoc'].forEach(hName => this._defaultHandlers[hName] = devNull);
 
         if (Meteor.isClient) {
+            // there can be only one store registered
             this._connection.registerStore('__bucket_collections', Object.assign(this._defaultHandlers, {
-                update: ({id}) => {
-                    const bucketName = id.split(BUCKET_SEP)[0];
+                update: ({fields}) => {
+                    const {bucketName, collection, subscriptionId} = fields;
                     if (!_collectionsPerBucket[bucketName]) {
-                        _collectionsPerBucket[bucketName] = [];
+                        _collectionsPerBucket[bucketName] = {};
                     }
-                    const coll = this._ensureCollection(id);
-                    _collectionsPerBucket[bucketName].push(coll);
+                    if (!_collectionsPerBucket[bucketName][subscriptionId]) {
+                        _collectionsPerBucket[bucketName][subscriptionId] = [];
+                    }
+                    _collectionsPerBucket[bucketName][subscriptionId].push(
+                        this._ensureCollection(bucketName, collection, subscriptionId)
+                    );
                 }
             }));
         }
@@ -54,7 +59,12 @@ class Buckets {
             this.added = (collection, ...args) => {
                 const partName = bucketName + BUCKET_SEP + collection;
                 if (!collections[collection]) {
-                    _added.call(this, '__bucket_collections', partName, {collection});
+                    _added.call(this, '__bucket_collections', Random.id(), {
+                        bucketName,
+                        collection,
+                        subscriptionId: this._subscriptionId
+                    });
+                    collections[collection] = true;
                 }
                 return _added.call(this, partName, ...args);
             };
@@ -104,8 +114,6 @@ class Buckets {
         const handler = this._connection.subscribe(bucketName, ...params, callbacks);
         handler._name = bucketName;
         addDocsApi(handler, this, bucketName);
-        handler.then = readyPromise.then.bind(readyPromise);
-        handler.catch = readyPromise.catch.bind(readyPromise);
         handler.onStop = onStopCB => {
             if (typeof onStopCB !== 'function') {
                 throw new Error('Expected function, instead got:'+ (typeof onStopCB));
@@ -116,10 +124,12 @@ class Buckets {
             handler._onStop.push(onStopCB);
         };
         addAutoApi(handler, this, stopPromise, bucketName);
-        context.getHandler = () => _.omit(handler, 'then', 'catch');
-        return handler;
+        context.getHandler = () => handler;
+        return Object.assign(readyPromise, handler);
     }
-
+    obtainOnce (bucketName, ...params) {
+        return this.subscribe(bucketName, ...params).then(handler => handler.deactivate());
+    }
     prepare(bucketName, ...params) {
         const BucketsScope = function () {
         };
@@ -194,18 +204,20 @@ function addPromisesApi(params) {
                 return onReady && onReady.call(this);
             },
             onStop (e) {
+                const handler = context.getHandler();
                 if (e && callError) {
                     callError(e);
                 } else {
-                    callStop(context.getHandler());
+                    callStop(handler);
                 }
+                doDeactivation(e, handler);
                 return onStop && onStop.call(this, e);
             }
         }
     }
 }
 
-function addAutoApi(handler, scope, stopPromise, bucketName) {
+function addAutoApi(handler, scope, stopPromise) {
     handler.autorun = func => {
         if (!handler._tasks) {
             handler._tasks = [];
@@ -217,20 +229,32 @@ function addAutoApi(handler, scope, stopPromise, bucketName) {
         }));
         return handler;
     };
+    
     const _stop = handler.stop;
     const {_cacheExpirationTime = 0} = scope || {};
-    handler.stop = function (...args) {
-        Meteor.setTimeout(() => {
-            if (handler._tasks) {
-                handler._tasks.forEach(task => task.stop());
-            }
-            if (handler._onStop) {
-                handler._onStop.forEach(stopCb => stopCb && stopCb());
-            }
-            _stop.apply(this, args);
-        }, _cacheExpirationTime);
+
+    handler.stop = function (immediately) {
+        if (immediately) {
+            return _stop.call(this);
+        }
+        Meteor.setTimeout(_stop.bind(handler), _cacheExpirationTime);
         return stopPromise;
-    }
+    };
+
+    handler.deactivate = () => {
+        const subDef = scope._connection._subscriptions[handler.subscriptionId];
+        if (!subDef && !handler.deactivated) {
+            doDeactivation(new Error('Missing instance of subscription on connection'), handler);
+            return handler;
+        }
+        if (!handler.deactivated) {
+            if (subDef) {
+                subDef.remove();
+            }
+            Meteor.call('deactivateUniverseBucket', handler.subscriptionId, (err) => doDeactivation(err, handler));
+        }
+        return handler;
+    };
 }
 
 function addDocsApi(handler, scope, bucketName) {
@@ -239,14 +263,14 @@ function addDocsApi(handler, scope, bucketName) {
             return [];
         }
         if (typeof collectionNames === 'string') {
-            const coll = scope._ensureCollection(bucketName, collectionNames);
+            const coll = scope._ensureCollection(bucketName, collectionNames, handler.subscriptionId);
             if (coll) {
                 return coll.find(selector, options).fetch();
             }
             return [];
         }
         if (!collectionNames) {
-            collectionNames = _collectionsPerBucket[bucketName].map(c => c._name) || [];
+            collectionNames = _collectionsPerBucket[bucketName][handler.subscriptionId].map(c => c._name) || [];
         }
         let docs = [];
         collectionNames.forEach(fullName => {
@@ -259,7 +283,7 @@ function addDocsApi(handler, scope, bucketName) {
     };
     handler.getCount = (collectionNames, selector = {}) => {
         if (!collectionNames) {
-            collectionNames = _collectionsPerBucket[bucketName].map(c => c._name) || [];
+            collectionNames = _collectionsPerBucket[bucketName][handler.subscriptionId].map(c => c._name) || [];
         }
         if (typeof collectionNames === 'string') {
             collectionNames = [collectionNames];
@@ -279,6 +303,20 @@ function addDocsApi(handler, scope, bucketName) {
             return coll.findOne(selector, options);
         }
     };
+}
+
+function doDeactivation (err, handler) {
+    if (err) {
+        Meteor._debug && Meteor._debug(err);
+        return;
+    }
+    handler.deactivated = true;
+    if (handler._tasks) {
+        handler._tasks.forEach(task => task.stop());
+    }
+    if (handler._onStop) {
+        handler._onStop.forEach(stopCb => stopCb && stopCb());
+    }
 }
 
 let defaultBuckets;
@@ -318,6 +356,26 @@ class Bucket {
 
 function isCursor(c) {
     return c && c._publishCursor;
+}
+
+if (Meteor.isServer) {
+    Meteor.methods({
+        deactivateUniverseBucket (subscriptionId) {
+            check(subscriptionId, String);
+            const conId = this.connection.id;
+            if (!conId) {
+                throw new Error('Missing id of current connection!');
+            }
+            const connection = Meteor.server.sessions[conId];
+            if (!connection || !connection._namedSubs) {
+                throw new Error('Unrecognized connection for current session!');
+            }
+            if (!connection._namedSubs[subscriptionId]) {
+                throw new Error('Unrecognized subscription for current connection!');
+            }
+            connection._namedSubs[subscriptionId]._deactivate();
+        }
+    });
 }
 
 
