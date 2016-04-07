@@ -15,6 +15,7 @@ Package.onUse(function (api) {
     api.use([
         'universe:ecmascript',
         'underscore',
+        'ejson',
         'random',
         'mongo',
         'meteor',

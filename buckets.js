@@ -1,6 +1,7 @@
 const BUCKET_SEP = '→';
 const _collections = {};
 const _collectionsPerBucket = {};
+const _publishHandlers = {};
 class Buckets {
     constructor(params) {
         const {
@@ -24,17 +25,27 @@ class Buckets {
         if (Meteor.isClient) {
             // there can be only one store registered
             this._connection.registerStore('__bucket_collections', Object.assign(this._defaultHandlers, {
-                update: ({fields}) => {
-                    const {bucketName, collection, subscriptionId} = fields;
-                    if (!_collectionsPerBucket[bucketName]) {
-                        _collectionsPerBucket[bucketName] = {};
+                update: ({msg, fields}) => {
+                    if (msg !== 'added') {
+                        return;
                     }
-                    if (!_collectionsPerBucket[bucketName][subscriptionId]) {
-                        _collectionsPerBucket[bucketName][subscriptionId] = [];
+                    const {collection, hash} = fields;
+
+                    if (!_collectionsPerBucket[hash]) {
+                        _collectionsPerBucket[hash] = [];
                     }
-                    _collectionsPerBucket[bucketName][subscriptionId].push(
-                        this._ensureCollection(bucketName, collection, subscriptionId)
+                    _collectionsPerBucket[hash].push(
+                        this._ensureCollection(hash, collection)
                     );
+                    const storeDef = this._connection._stores[getTransportName(hash, collection)];
+                    var _update = storeDef.update;
+                    storeDef.update = (msg) => {
+                        if (msg.msg === 'added') {
+                            msg.msg = 'replace';
+                            msg.replace = true;
+                        }
+                        return _update.call(storeDef, msg);
+                    }
                 }
             }));
         }
@@ -45,7 +56,9 @@ class Buckets {
             throw new Error('Missing name in bucket publication!');
         }
         const {condition} = options || {};
-        return Meteor.publish(bucketName, function (...params) {
+        const buckets = this;
+        Meteor.publish(bucketName, function (hash, ...params) {
+            check(hash, String);
             if (typeof condition === 'function') {
                 if (!condition(Meteor.users(this.userId))) {
                     this.ready();
@@ -57,23 +70,21 @@ class Buckets {
             const _removed = this.removed;
             const collections = {};
             this.added = (collection, ...args) => {
-                const partName = bucketName + BUCKET_SEP + collection;
                 if (!collections[collection]) {
                     _added.call(this, '__bucket_collections', Random.id(), {
-                        bucketName,
                         collection,
-                        subscriptionId: this._subscriptionId
+                        hash
                     });
                     collections[collection] = true;
                 }
-                return _added.call(this, partName, ...args);
+                return _added.call(this, getTransportName(hash, collection), ...args);
             };
             this.changed = (collection, ...args) => {
-                return _changed.call(this, bucketName + BUCKET_SEP + collection, ...args);
+                return _changed.call(this, getTransportName(hash, collection), ...args);
             };
             this.removed = (collection, id) => {
                 if (!this._documents[collection]) {
-                    collection = bucketName + BUCKET_SEP + collection;
+                    collection = getTransportName(hash, collection);
                     if (!this._documents[collection]) {
                         console.error('some bug? or removed already');
                         return;
@@ -81,29 +92,48 @@ class Buckets {
                 }
                 return _removed.call(this, collection, id);
             };
-            let result = fn.call(this, ...params);
-            if (!result) {
-                return result;
-            }
-            if (!Array.isArray(result)) {
-                result = [result];
-            }
-            let index = 0;
-            result = result.filter(item => {
-                if (isCursor(item)) {
-                    return true;
-                }
-                if (!Array.isArray(item)) {
-                    item = [item];
-                }
-                item.forEach(customDoc => {
-                    const {_id = index++} = customDoc;
-                    this.added(bucketName, _id, customDoc);
-                })
-            });
+            return filterCursors (hash, bucketName, fn, params, this);
+        });
 
-            return result;
-        })
+        Meteor.methods({
+            ['staticAccess/buckets/'+bucketName] (hash, ...params) {
+                const data = {};
+                const tasks = [];
+                const ctx = {
+                    changed (){},
+                    removed (){},
+                    userId: Meteor.users.userId(),
+                    onStop: cb => tasks.push(cb),
+                    error: err => {
+                        if (err) {
+                            throw new err
+                        }
+                    },
+                    stop () {},
+                    connection: this.connection
+                };
+                ctx.added = (collection, id, doc) => {
+                    const transportName = getTransportName(hash, collection);
+                    if(!data[transportName]) {
+                        data[transportName] = {};
+                    }
+                    data[transportName][id] = doc;
+                };
+                ctx.ready = () => {};
+                const cursors = filterCursors (hash, bucketName, fn, params, this);
+                if (cursors && cursors.length) {
+                    cursors.forEach(cursor=> {
+                        const transportName = getTransportName(hash, cursor._getCollectionName());
+                        if(!data[transportName]) {
+                            data[transportName] = {};
+                        }
+                        cursor.forEach(doc => data[transportName][doc._id] = doc);
+                    });
+
+                }
+                return data;
+            }
+        });
     }
 
     subscribe(bucketName, ...params) {
@@ -111,8 +141,10 @@ class Buckets {
             throw new Error('Missing name in bucket subscription!');
         }
         const {callbacks, readyPromise, stopPromise, context} = addPromisesApi(params);
-        const handler = this._connection.subscribe(bucketName, ...params, callbacks);
+        const hash = getHashFromParams(bucketName, ...params);
+        const handler = this._connection.subscribe(bucketName, hash, ...params, callbacks);
         handler._name = bucketName;
+        handler.subscriptionHash = hash;
         addDocsApi(handler, this, bucketName);
         handler.onStop = onStopCB => {
             if (typeof onStopCB !== 'function') {
@@ -127,8 +159,19 @@ class Buckets {
         context.getHandler = () => handler;
         return Object.assign(readyPromise, handler);
     }
-    obtainOnce (bucketName, ...params) {
-        return this.subscribe(bucketName, ...params).then(handler => handler.deactivate());
+    once (bucketName, ...params) {
+        const hash = getHashFromParams(bucketName, ...params);
+        return new Promise((resolve, reject) => Meteor.call('staticAccess/buckets/'+bucketName, hash, ...params,
+            (err, data) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                //todo: update collections in buckets
+
+                resolve(/*handler*/);
+            }));
+
     }
     prepare(bucketName, ...params) {
         const BucketsScope = function () {
@@ -159,7 +202,7 @@ class Buckets {
     }
 
     _ensureCollection(...args) {
-        const name = args.join(BUCKET_SEP);
+        const name = getTransportName.apply(undefined, args);
         if (!_collections[name]) {
             let CollectionClass = this._CollectionClass._default_;
             if (this._CollectionClass[name]) {
@@ -169,6 +212,37 @@ class Buckets {
         }
         return _collections[name];
     }
+}
+
+function getTransportName (...args) {
+    return args.join(BUCKET_SEP);
+}
+
+function filterCursors (hash, bucketName, fn, params, ctx) {
+    let result = fn.call(this, ...params);
+    if (!result) {
+        return result;
+    }
+    if (!Array.isArray(result)) {
+        result = [result];
+    }
+    let index = 0;
+    result = result.filter(item => {
+        if (isCursor(item)) {
+            return true;
+        }
+        if (!Array.isArray(item)) {
+            item = [item];
+        }
+        item.forEach(customDoc => {
+            const {_id = index++} = customDoc;
+            ctx.added(getTransportName(hash, bucketName), _id, customDoc);
+        })
+    });
+    if (!result || !result.length) {
+        ctx.ready();
+    }
+    return result;
 }
 
 function addPromisesApi(params) {
@@ -229,7 +303,7 @@ function addAutoApi(handler, scope, stopPromise) {
         }));
         return handler;
     };
-    
+
     const _stop = handler.stop;
     const {_cacheExpirationTime = 0} = scope || {};
 
@@ -241,20 +315,20 @@ function addAutoApi(handler, scope, stopPromise) {
         return stopPromise;
     };
 
-    handler.deactivate = () => {
-        const subDef = scope._connection._subscriptions[handler.subscriptionId];
-        if (!subDef && !handler.deactivated) {
-            doDeactivation(new Error('Missing instance of subscription on connection'), handler);
-            return handler;
-        }
-        if (!handler.deactivated) {
-            if (subDef) {
-                subDef.remove();
-            }
-            Meteor.call('deactivateUniverseBucket', handler.subscriptionId, (err) => doDeactivation(err, handler));
-        }
-        return handler;
-    };
+    // handler.deactivate = () => {
+    //     const subDef = scope._connection._subscriptions[handler.subscriptionId];
+    //     if (!subDef && !handler.deactivated) {
+    //         doDeactivation(new Error('Missing instance of subscription on connection'), handler);
+    //         return handler;
+    //     }
+    //     if (!handler.deactivated) {
+    //         if (subDef) {
+    //             subDef.remove();
+    //         }
+    //         Meteor.call('deactivateUniverseBucket', handler.subscriptionId, (err) => doDeactivation(err, handler));
+    //     }
+    //     return handler;
+    // };
 }
 
 function addDocsApi(handler, scope, bucketName) {
@@ -263,14 +337,14 @@ function addDocsApi(handler, scope, bucketName) {
             return [];
         }
         if (typeof collectionNames === 'string') {
-            const coll = scope._ensureCollection(bucketName, collectionNames, handler.subscriptionId);
+            const coll = scope._ensureCollection(handler.subscriptionHash, collectionNames);
             if (coll) {
                 return coll.find(selector, options).fetch();
             }
             return [];
         }
         if (!collectionNames) {
-            collectionNames = _collectionsPerBucket[bucketName][handler.subscriptionId].map(c => c._name) || [];
+            collectionNames = _collectionsPerBucket[handler.subscriptionHash].map(c => c._name) || [];
         }
         let docs = [];
         collectionNames.forEach(fullName => {
@@ -283,7 +357,7 @@ function addDocsApi(handler, scope, bucketName) {
     };
     handler.getCount = (collectionNames, selector = {}) => {
         if (!collectionNames) {
-            collectionNames = _collectionsPerBucket[bucketName][handler.subscriptionId].map(c => c._name) || [];
+            collectionNames = _collectionsPerBucket[handler.subscriptionHash].map(c => c._name) || [];
         }
         if (typeof collectionNames === 'string') {
             collectionNames = [collectionNames];
@@ -298,11 +372,21 @@ function addDocsApi(handler, scope, bucketName) {
         return count;
     };
     handler.getDoc = (name, selector = {}, options = {}) => {
-        const coll = scope._ensureCollection(bucketName, name);
+        const coll = scope._ensureCollection(handler.subscriptionHash, name);
         if (coll) {
             return coll.findOne(selector, options);
         }
     };
+}
+
+const _mapHashes = {};
+//should be used only on client
+function getHashFromParams (...params) {
+    const paramsStr = EJSON.stringify(params);
+    if (!_mapHashes[paramsStr]) {
+        _mapHashes[paramsStr] = Random.id();
+    }
+    return _mapHashes[paramsStr];
 }
 
 function doDeactivation (err, handler) {
@@ -358,25 +442,26 @@ function isCursor(c) {
     return c && c._publishCursor;
 }
 
-if (Meteor.isServer) {
-    Meteor.methods({
-        deactivateUniverseBucket (subscriptionId) {
-            check(subscriptionId, String);
-            const conId = this.connection.id;
-            if (!conId) {
-                throw new Error('Missing id of current connection!');
-            }
-            const connection = Meteor.server.sessions[conId];
-            if (!connection || !connection._namedSubs) {
-                throw new Error('Unrecognized connection for current session!');
-            }
-            if (!connection._namedSubs[subscriptionId]) {
-                throw new Error('Unrecognized subscription for current connection!');
-            }
-            connection._namedSubs[subscriptionId]._deactivate();
-        }
-    });
-}
+// if (Meteor.isServer) {
+//     Meteor.methods({
+//         deactivateUniverseBucket (subscriptionId) {
+//             check(subscriptionId, String);
+//             const conId = this.connection.id;
+//             if (!conId) {
+//                 throw new Error('Missing id of current connection!');
+//             }
+//             const connection = Meteor.server.sessions[conId];
+//             if (!connection || !connection._namedSubs) {
+//                 throw new Error('Unrecognized connection for current session!');
+//             }
+//             if (!connection._namedSubs[subscriptionId]) {
+//                 throw new Error('Unrecognized subscription for current connection!');
+//             }
+//             connection._namedSubs[subscriptionId]._deactivate();
+//             delete connection._namedSubs[subscriptionId];
+//         }
+//     });
+// }
 
 
 export default Bucket;
