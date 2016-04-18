@@ -82,7 +82,7 @@ class Buckets {
         });
 
         Meteor.methods({
-            ['staticAccess/buckets/'+bucketName] (hash, ...params) {
+            ['buckets/'+bucketName] (hash, ...params) {
                 const data = {};
                 const tasks = [];
                 const ctx = {
@@ -161,7 +161,7 @@ class Buckets {
         context.getHandler = () => handler;
         return Object.assign(readyPromise, handler);
     }
-    once (bucketName, ...params) {
+    load (bucketName, ...params) {
         const hash = getHashFromParams(bucketName, ...params);
         const fakeHandler = {
             _name: bucketName,
@@ -233,7 +233,7 @@ class Buckets {
         };
         addDocsApi(fakeHandler, this, bucketName);
         addAutoApi(fakeHandler, this, bucketName);
-        let result = new Promise((resolve, reject) => Meteor.call('staticAccess/buckets/'+bucketName, hash, ...params,
+        let result = new Promise((resolve, reject) => Meteor.call('buckets/'+bucketName, hash, ...params,
             (err, data) => {
                 if (err) {
                     deactivate(err, fakeHandler);
@@ -536,7 +536,7 @@ class Bucket {
             }
         }
         if (Meteor.isClient) {
-            delete this.publish;
+            delete this['publish'];
         }
     }
 
@@ -548,8 +548,8 @@ class Bucket {
         return this._buckets.subscribe(this._name, ...params);
     }
 
-    once(...params) {
-        return this._buckets.subscribe(this._name, ...params);
+    load(...params) {
+        return this._buckets.load(this._name, ...params);
     }
 
     prepare(...params) {
