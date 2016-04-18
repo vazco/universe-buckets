@@ -85,8 +85,8 @@ Extra api:
 This is good option for long listings where performance is more important than reactivity of items. 
 
 Of course you can ask why not use just a meteor call (rpc method) instead of that.
-The answer is simple:
-Bucket api give you possibility of:
+The answer is simple, Bucket api give you possibility of:
+
 - searching in those data (using mongo selectors)
 - you can write just one publish method for both functionalities (subscribe / load)
 - load method gives you possibility of adding reactivity for selected documents in bucket. It means that some of items in your listing still can be reactive. 
