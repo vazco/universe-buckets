@@ -81,7 +81,6 @@ Extra api:
 - `.getCount(collectionName = ALL, selector = {}, options = {})`
 - `.subscriptionHash`
 
-
 #### `MyBucket.load(...params)` works as subscribe method but without tracking of changes (non-reactive).
 This is good option for long listings where performance is more important than reactivity of items. 
 
@@ -112,6 +111,19 @@ Extra api:
 - `.subscriptionHash`
 - `.isStatic: true`
 - `.observeCursor(cursor)`
+
+### Extra stuff in handler
+As you can see bucket handlers have additional stuff.
+So, any time when you call bucket.subscribe or bucket.load,
+you will get a handler which contains standard api but also handler can be treat as a promise (it mean, there are available then/catch methods on it)
+
+additionally you can find methods like autorun which is bound with life cycle of subscription (subscribe - stop).
+
+Of course there are methods to gets data from buckets like getDocs/getDoc/getCount.
+
+besides methods, there are few properties like subscriptionHash
+witch is same for subscription of buckets with the same parameters. 
+
 
 ### Creation of collections of buckets
 > to be continued soon
