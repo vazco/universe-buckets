@@ -79,6 +79,7 @@ Extra api:
 - `.getDocs(collectionName = ALL, selector = {}, options = {})`
 - `.getDoc(collectionName = ALL, selector = {}, options = {})`
 - `.getCount(collectionName = ALL, selector = {}, options = {})`
+- `.subscriptionHash`
 
 
 #### `MyBucket.load(...params)` works as subscribe method but without tracking of changes (non-reactive).
