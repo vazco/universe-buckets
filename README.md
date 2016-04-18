@@ -94,6 +94,7 @@ The answer is simple, Bucket api give you possibility of:
 ##### load method returns the handle, which is pretty much same like this one returned by subscribe:
 
 Standard api:
+
 - `.ready()`
 - `.stop()`
 - `.subscriptionId`
