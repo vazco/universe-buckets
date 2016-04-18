@@ -91,5 +91,25 @@ The answer is simple, Bucket api give you possibility of:
 - you can write just one publish method for both functionalities (subscribe / load)
 - load method gives you possibility of adding reactivity for selected documents in bucket. It means that some of items in your listing still can be reactive. 
 
+##### load method returns the handle, which is pretty much same like this one returned by subscribe:
+
+Standard api:
+- `.ready()`
+- `.stop()`
+- `.subscriptionId`
+
+Extra api:
+
+- `.then(function(handler){})`
+- `.catch(function(error){})`
+- `.onStop(callback)`
+- `.autorun(function(computation){})`
+- `.getDocs(collectionName = ALL, selector = {}, options = {})`
+- `.getDoc(collectionName = ALL, selector = {}, options = {})`
+- `.getCount(collectionName = ALL, selector = {}, options = {})`
+- `.subscriptionHash`
+- `.isStatic: true`
+- `.observeCursor(cursor)`
+
 ### Creation of collections of buckets
 > to be continued soon
