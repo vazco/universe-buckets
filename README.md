@@ -6,7 +6,15 @@ you don't need to search in collection of documents
 second time on client.
 Additionally api of buckets brings many improvements and syntactic sugars.
 
+### Using with async functions
 
+```js
+(async function () {
+    const {getDocs, stop} = await bucketB.subscribe();
+    console.log(getCount());
+    stop();
+})();
+```
 ## Installation
 ```sh
     $ meteor add universe:buckets

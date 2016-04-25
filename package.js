@@ -11,16 +11,37 @@ Package.describe({
 });
 
 Package.onUse(function (api) {
-    api.versionsFrom('1.2.1');
+    api.versionsFrom('1.3');
     api.use([
-        'universe:ecmascript',
+        'ecmascript',
         'underscore',
         'ejson',
         'random',
         'mongo',
         'meteor',
-        'universe:utilities',
+        'tracker',
+        'universe:utilities@2.3.2',
         'check'
     ]);
-    api.addFiles('buckets.js');
+    api.mainModule('buckets.js');
+});
+
+Package.onTest(function (api) {
+    api.use([
+        'ecmascript',
+        'underscore',
+        'ejson',
+        'random',
+        'mongo',
+        'meteor',
+        'tracker',
+        'universe:buckets',
+        'universe:utilities@2.3.2',
+        'tinytest',
+        'underscore',
+        'test-helpers',
+        'check'
+    ]);
+    api.addFiles('tests.js', ['client', 'server']);
+
 });

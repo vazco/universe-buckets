@@ -82,7 +82,7 @@ class Buckets {
         });
 
         Meteor.methods({
-            ['buckets/'+bucketName] (hash, ...params) {
+            ['bucketsLoad'+BUCKET_SEP+bucketName] (hash, ...params) {
                 const data = {};
                 const tasks = [];
                 const ctx = {
@@ -233,7 +233,7 @@ class Buckets {
         };
         addDocsApi(fakeHandler, this, bucketName);
         addAutoApi(fakeHandler, this, bucketName);
-        let result = new Promise((resolve, reject) => Meteor.call('buckets/'+bucketName, hash, ...params,
+        let result = new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
             (err, data) => {
                 if (err) {
                     deactivate(err, fakeHandler);
@@ -326,6 +326,9 @@ class Buckets {
 }
 
 function getTransportName (...args) {
+    if (args[1] && args[1]._name && args[1] instanceof Mongo.Collection) {
+        args[1] = args[1]._name;
+    }
     return args.join(BUCKET_SEP);
 }
 
@@ -348,7 +351,8 @@ function filterCursors (hash, bucketName, fn, params, ctx) {
         }
         item.forEach(customDoc => {
             const {_id = index++} = customDoc;
-            ctx.added(getTransportName(hash, bucketName), _id, customDoc);
+            ctx.added(bucketName, _id, customDoc);
+            ctx.onStop(() => ctx.removed(bucketName, _id));
         })
     });
     if (!result || !result.length) {
@@ -420,9 +424,10 @@ function addAutoApi(handler, scope, stopPromise) {
 
     handler.stop = function (immediately) {
         if (immediately) {
-            return _stop.call(this);
+            _stop.call(this);
+        } else {
+            Meteor.setTimeout(_stop.bind(handler), _cacheExpirationTime);
         }
-        Meteor.setTimeout(_stop.bind(handler), _cacheExpirationTime);
         return stopPromise;
     };
 
@@ -441,7 +446,8 @@ function addDocsApi(handler, scope, bucketName) {
                 dependCollsCount(handler.subscriptionHash, options.reactive !== false);
             }
         }
-        if (typeof collectionNames === 'string') {
+        if (typeof collectionNames === 'string' ||
+            (typeof collectionNames === 'object' && collectionNames instanceof  Mongo.Collection)) {
             collectionNames = [getTransportName(handler.subscriptionHash, collectionNames)];
         }
         let docs = [];
