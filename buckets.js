@@ -88,6 +88,12 @@ class Buckets {
 
         Meteor.methods({
             ['bucketsLoad'+BUCKET_SEP+bucketName] (hash, ...params) {
+                if (typeof condition === 'function') {
+                    if (!condition(Meteor.users(this.userId))) {
+                        this.unblock();
+                        return;
+                    }
+                }
                 const data = {};
                 const tasks = [];
                 const ctx = {
