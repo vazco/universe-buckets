@@ -9,9 +9,10 @@ Additionally api of buckets brings many improvements and syntactic sugars.
 ### Using with async functions
 
 ```js
+var MyBucket = new Bucket('users');
 (async function () {
-    const {getDocs, stop} = await bucketB.subscribe();
-    console.log(getCount());
+    const {getDocs, stop} = await MyBucket.subscribe();
+    console.log('users:', getDocs());
     stop();
 })();
 ```
@@ -61,10 +62,28 @@ can be processed for current user.
 MyBucket.subscribe().then(handler => {
     console.log('Ready');
     console.log('users:', handler.getDocs('users'));
-    console.log('custom docs:', handler.getDocs('uniqueName'));
+    console.log('custom docs:', handler.getDocs(null));
     console.log('all in buckets:', handler.getDocs());
     console.log('admins in users:', handler.getDocs('users', {is_admin: true}, {limit:2}));
 });
+```
+
+or with async/await
+```js
+async function example () {
+    const {
+        getDocs,
+        getCount,
+        getDoc,
+        ready,
+        stop
+    } = await MyBucket.subscribe();
+    console.log('users:', getDocs('users'));
+    console.log('custom docs count:', getCount(null));
+    console.log('one doc:', getDoc());
+    console.log('reade:', ready());
+    stop(true); // stops now
+}
 ```
 
 The name of subscription is omitted because we are working on bucket instance.

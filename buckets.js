@@ -2,7 +2,6 @@ const BUCKET_SEP = '→';
 const _collections = {};
 const _collectionNamesPerBucket = {};
 const _collectionDeps = {};
-const _publishHandlers = {};
 class Buckets {
     constructor(params) {
         const {
@@ -18,6 +17,7 @@ class Buckets {
         this._connection = connection;
         this._cacheExpirationTime = cacheExpirationTime;
         this._defaultHandlers = {};
+        this._activeHandlers = {};
         this._collectionDeps = {};
         const devNull = () => {
         };
@@ -34,12 +34,17 @@ class Buckets {
                     this._ensureCollection(fields.hash, fields.collection);
                 }
             }));
+        } else {
+            this._publishHandlers = {};
         }
     }
 
     publish(bucketName, fn, options) {
         if (!bucketName || typeof bucketName !== 'string') {
             throw new Error('Missing name in bucket publication!');
+        }
+        if (this._publishHandlers[bucketName]) {
+            throw new Error('Bucket "'+bucketName+'" publication already exists!');
         }
         const {condition} = options || {};
         const buckets = this;
@@ -136,17 +141,21 @@ class Buckets {
                 return getResult();
             }
         });
+
+        this._publishHandlers[bucketName] = true;
     }
 
     subscribe(bucketName, ...params) {
         if (!bucketName || typeof bucketName !== 'string') {
             throw new Error('Missing name in bucket subscription!');
         }
-        const {callbacks, readyPromise, stopPromise, context} = addPromisesApi(params);
+        const {callbacks, readyPromise, stopPromise, context} = addPromisesApi(params, this);
         const hash = getHashFromParams(bucketName, ...params);
         const handler = this._connection.subscribe(bucketName, hash, ...params, callbacks);
         handler._name = bucketName;
+        handler.isStatic = false;
         handler.subscriptionHash = hash;
+        _activateSubs(this, handler);
         addDocsApi(handler, this, bucketName);
         handler.onStop = onStopCB => {
             if (typeof onStopCB !== 'function') {
@@ -156,11 +165,13 @@ class Buckets {
                 handler._onStop = [];
             }
             handler._onStop.push(onStopCB);
+            return handler;
         };
         addAutoApi(handler, this, stopPromise, bucketName);
         context.getHandler = () => handler;
         return Object.assign(readyPromise, handler);
     }
+
     load (bucketName, ...params) {
         const hash = getHashFromParams(bucketName, ...params);
         const fakeHandler = {
@@ -175,68 +186,124 @@ class Buckets {
                 fakeHandler._deps.depend();
                 return !!fakeHandler._ready;
             },
-            stop () {
-                deactivate(undefined, fakeHandler);
-                return Promise.resolve()
+            stop: () => {
+                if (deactivate(undefined, fakeHandler, this)) {
+                    unload(hash, this);
+                }
+                return fakeHandler;
             },
-            observeCursor(cursor) {
-                if(!cursor && !cursor.observeChanges) {
+            onStop: (onStopCB) => {
+                if (typeof onStopCB !== 'function') {
+                    throw new Error('Expected function, instead got:' + (typeof onStopCB));
+                }
+                if (!fakeHandler._onStop) {
+                    fakeHandler._onStop = [];
+                }
+                fakeHandler._onStop.push(onStopCB);
+                return fakeHandler;
+            },
+            observeCursor: (cursor) => {
+                if (!cursor && !cursor.observeChanges) {
                     throw new Error('Cursor object was expected');
                 }
-                const transportName = getTransportName(hash, cursor._getCollectionName);
+                const transportName = getTransportName(hash, cursor._getCollectionName());
                 const coll = this._ensureCollection(transportName);
-                if (!handler._tasks) {
-                    handler._tasks = [];
+                if (!fakeHandler._tasks) {
+                    fakeHandler._tasks = [];
                 }
                 const storeDef = this._connection._stores[transportName];
                 storeDef.beginUpdate();
-                handler._tasks.push(cursor.observeChanges({
+                let init = true;
+                fakeHandler._tasks.push(cursor.observeChanges({
                     added (id, fields) {
+                        if (!init) {
+                            storeDef.beginUpdate();
+                        }
                         var doc = coll._collection.findOne(id);
                         if (doc) {
-                            coll._collection.update(id);
+                            storeDef.update({
+                                msg: 'changed',
+                                fields,
+                                id
+                            });
                         } else {
-                            fields._id = id;
-                            coll._collection.insert(fields);
+                            storeDef.update({
+                                msg: 'added',
+                                fields,
+                                id
+                            });
+                        }
+                        if (!init) {
+                            storeDef.endUpdate();
                         }
                     },
                     changed(id, fields) {
-                        var doc = coll._collection.findOne(id);
-                        if (!doc) {
-                            coll._collection.insert(cursor.collection.findOne(id));
-                            return;
-                        }
-                        var modifier = {};
-                        _.each(fields, function (value, key) {
-                            if (value === undefined) {
-                                if (!modifier.$unset)
-                                    modifier.$unset = {};
-                                modifier.$unset[key] = 1;
+                        _.delay(()=> {
+                            storeDef.beginUpdate();
+                            var doc = coll._collection.findOne(id);
+                            if (!doc) {
+                                fields = cursor.collection.findOne(id);
+                                delete fields._id;
+                                storeDef.update({
+                                    msg: 'added',
+                                    fields,
+                                    id
+                                });
+                                // coll._collection.insert(cursor.collection.findOne(id));
                             } else {
-                                if (!modifier.$set)
-                                    modifier.$set = {};
-                                modifier.$set[key] = value;
+                                storeDef.update({
+                                    msg: 'changed',
+                                    fields,
+                                    id
+                                });
                             }
+                            storeDef.endUpdate();
                         });
-                        coll._collection.update(mongoId, modifier);
+
+
+                        // var modifier = {};
+                        // _.each(fields, function (value, key) {
+                        //     if (value === undefined) {
+                        //         if (!modifier.$unset)
+                        //             modifier.$unset = {};
+                        //         modifier.$unset[key] = 1;
+                        //     } else {
+                        //         if (!modifier.$set)
+                        //             modifier.$set = {};
+                        //         modifier.$set[key] = value;
+                        //     }
+                        // });
+                        // console.log('modifier', modifier, id);
+                        // coll._collection.update(id, modifier);
+                        // // Meteor.setTimeout(() => console.log('->',coll._collection.findOne(id), coll._name), 1000);
+                        // console.log('->',coll._collection.findOne(id), coll._name);
+
                     },
                     removed (id) {
+                        storeDef.beginUpdate();
                         var doc = coll._collection.findOne(id);
                         if (doc) {
-                            coll._collection.remove(id);
+                            // coll._collection.remove(id);
+                            storeDef.update({
+                                msg: 'removed',
+                                id
+                            });
                         }
+                        storeDef.endUpdate();
                     }
                 }));
                 storeDef.endUpdate();
+                init = false;
                 return fakeHandler;
             }
         };
+        _activateSubs(this, fakeHandler);
         addDocsApi(fakeHandler, this, bucketName);
-        addAutoApi(fakeHandler, this, bucketName);
-        let result = new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
+        addAutoApi(fakeHandler, this, Promise.resolve(fakeHandler));
+        let promiseResult = new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
             (err, data) => {
                 if (err) {
-                    deactivate(err, fakeHandler);
+                    deactivate(err, fakeHandler, this);
                     reject(err);
                     return;
                 }
@@ -256,12 +323,16 @@ class Buckets {
                         return;
                     }
                     storeDef.beginUpdate();
-                    Object.keys(data[collName]).forEach(id => storeDef.update({
-                        msg:  'replace',
-                        replace: data[collName][id],
-                        collection: collName,
-                        id
-                    }));
+                    Object.keys(data[collName]).forEach(id => {
+                        const doc = data[collName][id];
+                        doc._id = id;
+                        storeDef.update({
+                            msg:  'replace',
+                            replace: data[collName][id],
+                            collection: collName,
+                            id
+                        })
+                    });
                     storeDef.endUpdate();
                 });
                 resolve(fakeHandler);
@@ -269,10 +340,9 @@ class Buckets {
                     this._deps.changed();
                 }
             }));
-
-        return Object.assign(result, fakeHandler);
-
+        return Object.assign(promiseResult, fakeHandler);
     }
+
     prepare(bucketName, ...params) {
         const BucketsScope = function () {
         };
@@ -360,7 +430,31 @@ function filterCursors (hash, bucketName, fn, params, ctx) {
     }
     return result;
 }
-function addPromisesApi(params) {
+
+function _activateSubs (buckets, handler) {
+    if (!buckets._activeHandlers[handler.subscriptionHash]) {
+        buckets._activeHandlers[handler.subscriptionHash] = {};
+    }
+    buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId] = handler;
+}
+
+function unload (subscriptionHash, buckets) {
+    const collectionNames = _collectionNamesPerBucket[subscriptionHash] || [];
+    collectionNames.forEach(collName => {
+        const ids = buckets._ensureCollection(collName).find().map(doc => doc._id) || [];
+        const storeDef = buckets._connection._stores[collName];
+        storeDef.beginUpdate();
+        ids.forEach(id => storeDef.update({
+            msg:  'removed',
+            collection: collName,
+            id
+        }));
+        storeDef.endUpdate();
+    });
+
+}
+
+function addPromisesApi(params, buckets) {
     let onReady, onStop, callError, callReady, callStop;
     const context = {};
     if (params.length) {
@@ -399,7 +493,7 @@ function addPromisesApi(params) {
                 } else {
                     callStop(handler);
                 }
-                deactivate(e, handler);
+                deactivate(e, handler, buckets);
                 return onStop && onStop.call(this, e);
             }
         }
@@ -424,11 +518,11 @@ function addAutoApi(handler, scope, stopPromise) {
 
     handler.stop = function (immediately) {
         if (immediately) {
-            _stop.call(this);
+            _stop.call(handler);
         } else {
             Meteor.setTimeout(_stop.bind(handler), _cacheExpirationTime);
         }
-        return stopPromise;
+        return Object.assign(stopPromise, handler);
     };
 
 }
@@ -502,7 +596,7 @@ function getHashFromParams (...params) {
     return _mapHashes[paramsStr];
 }
 
-function deactivate (err, handler) {
+function deactivate (err, handler, buckets) {
     if (err) {
         Meteor._debug && Meteor._debug(err);
         return;
@@ -511,7 +605,11 @@ function deactivate (err, handler) {
         handler._tasks.forEach(task => task.stop());
     }
     if (handler._onStop) {
-        handler._onStop.forEach(stopCb => stopCb && stopCb());
+        handler._onStop.forEach(stopCb => stopCb && stopCb(handler));
+    }
+    delete buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId];
+    if (!Object.keys(buckets._activeHandlers[handler.subscriptionHash]).length) {
+        return delete buckets._activeHandlers[handler.subscriptionHash];
     }
 }
 
