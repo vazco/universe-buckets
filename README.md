@@ -30,6 +30,7 @@ In this section we will explain how to use single instance of bucket.
 - both sides
 
 ```js
+import {Bucket} from 'meteor/universe:buckets';
 var MyBucket = new Bucket('uniqueName');
 ```
 
@@ -138,6 +139,11 @@ Extra api:
 - `.subscriptionHash`
 - `.isStatic: true`
 - `.observeCursor(cursor)`
+
+#### Adding reactivity for some documents in bucket
+
+
+
 
 ### Extra stuff in handler
 As you can see bucket handlers have additional stuff.
