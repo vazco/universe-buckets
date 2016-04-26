@@ -6,16 +6,6 @@ you don't need to search in collection of documents
 second time on client.
 Additionally api of buckets brings many improvements and syntactic sugars.
 
-### Using with async functions
-
-```js
-var MyBucket = new Bucket('users');
-(async function () {
-    const {getDocs, stop} = await MyBucket.subscribe();
-    console.log('users:', getDocs());
-    stop();
-})();
-```
 ## Installation
 ```sh
     $ meteor add universe:buckets
@@ -40,10 +30,15 @@ var MyBucket = new Bucket('uniqueName');
 - On server side
 
 ```js
-MyBucket.publish(() => [
-    Meteor.users.find(),
-    [{someData: 1}, {someData: 2}]
-])
+MyBucket.publish(function () {
+   //you can return cursor, array of cursors or even array of plain objects
+    return ([
+        //cursor:
+        Meteor.users.find(),
+        //plain objects:
+        [{someData: 1}, {someData: 2}]
+    ]);
+})
 ```
 As you can see on example you can publish array of cursors and even **array of objects**
 
@@ -69,7 +64,9 @@ MyBucket.subscribe().then(handler => {
 });
 ```
 
-or with async/await
+
+#### Using with async functions
+
 ```js
 async function example () {
     const {
@@ -83,12 +80,13 @@ async function example () {
     console.log('custom docs count:', getCount(null));
     console.log('one doc:', getDoc());
     console.log('reade:', ready());
-    stop(true); // stops now
+    stop().onStop(() => console.log('stopped'));
 }
 ```
 
 The name of subscription is omitted because we are working on bucket instance.
 Of course you can pass some arguments to subscriptions as on Meteor.subscribe/Meteor.publish.
+
 
 #### `MyBucket.subscribe(...params)` returns an handler object, which has:
 
@@ -142,7 +140,28 @@ Extra api:
 
 #### Adding reactivity for some documents in bucket
 
+```js
+//both sides:
+const usersBucket = new Bucket('usersBucket');
+if (Meteor.isServer) {
+    usersBucket.publish(function() {
+        return Meteor.users.find();
+    });
+}
+// client:
+(async function () {
+        const {getDoc, getDocs, observeCursor} = await usersBucket.load();
+        const loggedInId = Meteor.userId();
+        observeCursor(Meteor.users.find(loggedInId));
+        //will be reactive
+        const user1 = getDoc('users', loggedInId);
+        // will be nonreactive
+        const user2 = getDoc('users', 'otherId');
 
+        // Will be reactive only for one user
+        const allDocs = getDocs();
+})
+```
 
 
 ### Extra stuff in handler
