@@ -58,7 +58,7 @@ if (Meteor.isServer) {
     Tinytest.addAsync('UniverseBucket - publish', function (test, onComplete) {
         test.equal(typeof bucketA.publish, 'function', 'Missing subscribe function');
         try {
-            const someBucket = new Bucket('someBucket');
+            const someBucket = new Bucket('someBucket_' + Random.id());
             someBucket.publish({});
         } catch (e) {
             test.exception(e);
@@ -116,10 +116,10 @@ if (Meteor.isServer) {
                     test.equal(handler1.getCount(), handler2.getCount(), 'Counts should be same');
                     test.equal(handler1.getCount(), 0, 'Number should be zero');
                     onComplete();
-                }, 400);
+                }, 500);
             }).stop(true);
 
-        }, 400);
+        }, 500);
     });
 
     Tinytest.addAsync('UniverseBucket - autorun', async function (test, onComplete) {
@@ -159,7 +159,7 @@ if (Meteor.isServer) {
                 computation.stop();
                 test.isTrue(j === 1, 'Promise should be nonreactive');
                 onComplete();
-            }, 1000));
+            }, 2000));
         });
 
     });
@@ -174,9 +174,9 @@ if (Meteor.isServer) {
                 Meteor.setTimeout(() => {
                     test.equal(getCount(), 0, 'should be zero');
                     onComplete();
-                }, 600);
+                }, 900);
             })
-        }, 600));
+        }, 900));
 
     });
 
