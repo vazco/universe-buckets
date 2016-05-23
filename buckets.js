@@ -341,9 +341,10 @@ class Buckets {
                     });
                     storeDef.endUpdate();
                 });
+                fakeHandler._ready = true;
                 resolve(fakeHandler);
-                if (this._deps){
-                    this._deps.changed();
+                if (fakeHandler._deps){
+                    fakeHandler._deps.changed();
                 }
             }));
         return Object.assign(promiseResult, fakeHandler);
