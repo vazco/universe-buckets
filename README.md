@@ -179,3 +179,5 @@ witch is same for subscription of buckets with the same parameters.
 
 ### Creation of collections of buckets
 > to be continued soon
+
+License MIT
