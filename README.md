@@ -1,3 +1,5 @@
+<a href="http://unicms.io"><img src="http://unicms.io/banners/standalone.png" /></a>
+
 # Universe Buckets
 This package provides possibility of publishing documents
 from various collections to bucket (sandbox).
