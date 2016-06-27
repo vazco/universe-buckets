@@ -139,6 +139,7 @@ Extra api:
 - `.subscriptionHash`
 - `.isStatic: true`
 - `.observeCursor(cursor)`
+- `.refresh()`
 
 #### Adding reactivity for some documents in bucket
 
