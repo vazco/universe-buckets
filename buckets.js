@@ -193,7 +193,7 @@ class Buckets {
                 return !!fakeHandler._ready;
             },
             stop: () => {
-                if (deactivate(undefined, fakeHandler, this)) {
+                if(deactivate(undefined, fakeHandler, this)) {
                     unload(hash, this);
                 }
                 return fakeHandler;
@@ -306,25 +306,27 @@ class Buckets {
         _activateSubs(this, fakeHandler);
         addDocsApi(fakeHandler, this, bucketName);
         addAutoApi(fakeHandler, this, Promise.resolve(fakeHandler));
-        let promiseResult = new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
+        let refreshBucket = () => new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
             (err, data) => {
                 if (err) {
                     deactivate(err, fakeHandler, this);
                     reject(err);
                     return;
                 }
-                //todo: update collections in buckets
                 Object.keys(data).forEach(collName => {
                     this._ensureCollection(collName);
                     const storeDef = this._connection._stores[collName];
-                    var _update = storeDef.update;
-                    storeDef.update = (msg) => {
-                        if (msg.msg === 'added') {
-                            msg.msg = 'replace';
-                            msg.replace = msg.fields;
-                        }
-                        return _update.call(storeDef, msg);
-                    };
+                    if (!storeDef.isPatchedForBuckets) {
+                        var _update = storeDef.update;
+                        storeDef.update = (msg) => {
+                            if (msg.msg === 'added') {
+                                msg.msg = 'replace';
+                                msg.replace = msg.fields;
+                            }
+                            return _update.call(storeDef, msg);
+                        };
+                        storeDef.isPatchedForBuckets = true;
+                    }
                     if(!data[collName]){
                         return;
                     }
@@ -347,7 +349,16 @@ class Buckets {
                     fakeHandler._deps.changed();
                 }
             }));
-        return Object.assign(promiseResult, fakeHandler);
+        fakeHandler.refresh = () => {
+            _activateSubs(this, fakeHandler);
+            fakeHandler._ready = false;
+            if (fakeHandler._deps){
+                fakeHandler._deps.changed();
+            }
+            unload(hash, this);
+            return Object.assign(refreshBucket(), fakeHandler);
+        };
+        return Object.assign(refreshBucket(), fakeHandler);
     }
 
     prepare(bucketName, ...params) {
@@ -614,9 +625,11 @@ function deactivate (err, handler, buckets) {
     if (handler._onStop) {
         handler._onStop.forEach(stopCb => stopCb && stopCb(handler));
     }
-    delete buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId];
-    if (!Object.keys(buckets._activeHandlers[handler.subscriptionHash]).length) {
-        return delete buckets._activeHandlers[handler.subscriptionHash];
+    if (buckets._activeHandlers[handler.subscriptionHash]){
+        delete buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId];
+        if (!Object.keys(buckets._activeHandlers[handler.subscriptionHash]).length) {
+            return delete buckets._activeHandlers[handler.subscriptionHash];
+        }
     }
 }
 
