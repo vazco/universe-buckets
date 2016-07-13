@@ -11,7 +11,8 @@ class Buckets {
         } = params || {};
         if (Meteor.isClient) {
             //publish can be called only on server side!
-            delete this.publish;
+            this.publish = () => {
+            };
         }
         this._CollectionClass = {_default_: storageClass};
         this._connection = connection;
@@ -44,7 +45,7 @@ class Buckets {
             throw new Error('Missing name in bucket publication!');
         }
         if (this._publishHandlers[bucketName]) {
-            throw new Error('Bucket "'+bucketName+'" publication already exists!');
+            throw new Error('Bucket "' + bucketName + '" publication already exists!');
         }
         const {condition} = options || {};
         const buckets = this;
@@ -83,11 +84,11 @@ class Buckets {
                 }
                 return _removed.call(this, collection, id);
             };
-            return filterCursors (hash, bucketName, fn, params, this);
+            return filterCursors(hash, bucketName, fn, params, this);
         });
 
         Meteor.methods({
-            ['bucketsLoad'+BUCKET_SEP+bucketName] (hash, ...params) {
+            ['bucketsLoad' + BUCKET_SEP + bucketName] (hash, ...params) {
                 if (typeof condition === 'function') {
                     if (!condition(Meteor.users(this.userId))) {
                         this.unblock();
@@ -165,7 +166,7 @@ class Buckets {
         addDocsApi(handler, this, bucketName);
         handler.onStop = onStopCB => {
             if (typeof onStopCB !== 'function') {
-                throw new Error('Expected function, instead got:'+ (typeof onStopCB));
+                throw new Error('Expected function, instead got:' + (typeof onStopCB));
             }
             if (!handler._onStop) {
                 handler._onStop = [];
@@ -178,7 +179,7 @@ class Buckets {
         return Object.assign(readyPromise, handler);
     }
 
-    load (bucketName, ...params) {
+    load(bucketName, ...params) {
         const hash = getHashFromParams(bucketName, ...params);
         const fakeHandler = {
             _name: bucketName,
@@ -193,7 +194,7 @@ class Buckets {
                 return !!fakeHandler._ready;
             },
             stop: () => {
-                if(deactivate(undefined, fakeHandler, this)) {
+                if (deactivate(undefined, fakeHandler, this)) {
                     unload(hash, this);
                 }
                 return fakeHandler;
@@ -306,13 +307,14 @@ class Buckets {
         _activateSubs(this, fakeHandler);
         addDocsApi(fakeHandler, this, bucketName);
         addAutoApi(fakeHandler, this, Promise.resolve(fakeHandler));
-        let refreshBucket = () => new Promise((resolve, reject) => Meteor.call('bucketsLoad'+BUCKET_SEP+bucketName, hash, ...params,
+        let refreshBucket = () => new Promise((resolve, reject) => Meteor.call('bucketsLoad' + BUCKET_SEP + bucketName, hash, ...params,
             (err, data) => {
                 if (err) {
                     deactivate(err, fakeHandler, this);
                     reject(err);
                     return;
                 }
+                unload(hash, this);
                 Object.keys(data).forEach(collName => {
                     this._ensureCollection(collName);
                     const storeDef = this._connection._stores[collName];
@@ -327,7 +329,7 @@ class Buckets {
                         };
                         storeDef.isPatchedForBuckets = true;
                     }
-                    if(!data[collName]){
+                    if (!data[collName]) {
                         return;
                     }
                     storeDef.beginUpdate();
@@ -335,7 +337,7 @@ class Buckets {
                         const doc = data[collName][id];
                         doc._id = id;
                         storeDef.update({
-                            msg:  'replace',
+                            msg: 'replace',
                             replace: data[collName][id],
                             collection: collName,
                             id
@@ -345,17 +347,16 @@ class Buckets {
                 });
                 fakeHandler._ready = true;
                 resolve(fakeHandler);
-                if (fakeHandler._deps){
+                if (fakeHandler._deps) {
                     fakeHandler._deps.changed();
                 }
             }));
-        fakeHandler.refresh = () => {
+        fakeHandler.refresh = (silent = true) => {
             _activateSubs(this, fakeHandler);
             fakeHandler._ready = false;
-            if (fakeHandler._deps){
+            if (fakeHandler._deps && !silent) {
                 fakeHandler._deps.changed();
             }
-            unload(hash, this);
             return Object.assign(refreshBucket(), fakeHandler);
         };
         return Object.assign(refreshBucket(), fakeHandler);
@@ -413,14 +414,14 @@ class Buckets {
     }
 }
 
-function getTransportName (...args) {
+function getTransportName(...args) {
     if (args[1] && args[1]._name && args[1] instanceof Mongo.Collection) {
         args[1] = args[1]._name;
     }
     return args.join(BUCKET_SEP);
 }
 
-function filterCursors (hash, bucketName, fn, params, ctx) {
+function filterCursors(hash, bucketName, fn, params, ctx) {
     let result = fn.call(ctx, ...params);
     if (!result) {
         ctx._willBeAsync();
@@ -449,21 +450,21 @@ function filterCursors (hash, bucketName, fn, params, ctx) {
     return result;
 }
 
-function _activateSubs (buckets, handler) {
+function _activateSubs(buckets, handler) {
     if (!buckets._activeHandlers[handler.subscriptionHash]) {
         buckets._activeHandlers[handler.subscriptionHash] = {};
     }
     buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId] = handler;
 }
 
-function unload (subscriptionHash, buckets) {
+function unload(subscriptionHash, buckets) {
     const collectionNames = _collectionNamesPerBucket[subscriptionHash] || [];
     collectionNames.forEach(collName => {
         const ids = buckets._ensureCollection(collName).find().map(doc => doc._id) || [];
         const storeDef = buckets._connection._stores[collName];
         storeDef.beginUpdate();
         ids.forEach(id => storeDef.update({
-            msg:  'removed',
+            msg: 'removed',
             collection: collName,
             id
         }));
@@ -547,7 +548,7 @@ function addAutoApi(handler, scope, stopPromise) {
 
 function addDocsApi(handler, scope, bucketName) {
     handler.getDocs = (collectionNames, selector = {}, options = {}) => {
-        if (Array.isArray(collectionNames)){
+        if (Array.isArray(collectionNames)) {
             collectionNames = collectionNames.map(cName => getTransportName(handler.subscriptionHash, cName));
         }
         if (!collectionNames) {
@@ -559,7 +560,7 @@ function addDocsApi(handler, scope, bucketName) {
             }
         }
         if (typeof collectionNames === 'string' ||
-            (typeof collectionNames === 'object' && collectionNames instanceof  Mongo.Collection)) {
+            (typeof collectionNames === 'object' && collectionNames instanceof Mongo.Collection)) {
             collectionNames = [getTransportName(handler.subscriptionHash, collectionNames)];
         }
         let docs = [];
@@ -572,7 +573,7 @@ function addDocsApi(handler, scope, bucketName) {
         return docs;
     };
     handler.getCount = (collectionNames, selector = {}, options = {}) => {
-        if (Array.isArray(collectionNames)){
+        if (Array.isArray(collectionNames)) {
             collectionNames = collectionNames.map(cName => getTransportName(handler.subscriptionHash, cName));
         }
         if (!collectionNames) {
@@ -606,7 +607,7 @@ function addDocsApi(handler, scope, bucketName) {
 
 const _mapHashes = {};
 //should be used only on client
-function getHashFromParams (...params) {
+function getHashFromParams(...params) {
     const paramsStr = EJSON.stringify(params);
     if (!_mapHashes[paramsStr]) {
         _mapHashes[paramsStr] = Random.id();
@@ -614,7 +615,7 @@ function getHashFromParams (...params) {
     return _mapHashes[paramsStr];
 }
 
-function deactivate (err, handler, buckets) {
+function deactivate(err, handler, buckets) {
     if (err) {
         Meteor._debug && Meteor._debug(err);
         return;
@@ -625,7 +626,7 @@ function deactivate (err, handler, buckets) {
     if (handler._onStop) {
         handler._onStop.forEach(stopCb => stopCb && stopCb(handler));
     }
-    if (buckets._activeHandlers[handler.subscriptionHash]){
+    if (buckets._activeHandlers[handler.subscriptionHash]) {
         delete buckets._activeHandlers[handler.subscriptionHash][handler.subscriptionId];
         if (!Object.keys(buckets._activeHandlers[handler.subscriptionHash]).length) {
             return delete buckets._activeHandlers[handler.subscriptionHash];
@@ -633,7 +634,7 @@ function deactivate (err, handler, buckets) {
     }
 }
 
-function dependCollsCount (subscriptionHash, reactive = true) {
+function dependCollsCount(subscriptionHash, reactive = true) {
     if (reactive) {
         if (!_collectionDeps[subscriptionHash]) {
             _collectionDeps[subscriptionHash] = new Tracker.Dependency();
