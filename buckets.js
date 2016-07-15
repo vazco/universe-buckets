@@ -176,6 +176,8 @@ class Buckets {
         };
         addAutoApi(handler, this, stopPromise, bucketName);
         context.getHandler = () => handler;
+        //to keep same api with load
+        handler.refresh = () => {};
         return Object.assign(readyPromise, handler);
     }
 
