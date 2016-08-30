@@ -9,17 +9,13 @@ class Buckets {
             connection = Meteor.connection,
             cacheExpirationTime = 0
         } = params || {};
-        if (Meteor.isClient) {
-            //publish can be called only on server side!
-            this.publish = () => {
-            };
-        }
         this._CollectionClass = {_default_: storageClass};
         this._connection = connection;
         this._cacheExpirationTime = cacheExpirationTime;
         this._defaultHandlers = {};
         this._activeHandlers = {};
         this._collectionDeps = {};
+        this._publishHandlers = {};
         const devNull = () => {
         };
         ['beginUpdate', 'endUpdate', 'saveOriginals',
@@ -35,12 +31,14 @@ class Buckets {
                     this._ensureCollection(fields.hash, fields.collection);
                 }
             }));
-        } else {
-            this._publishHandlers = {};
         }
     }
 
     publish(bucketName, fn, options) {
+        if (Meteor.isClient) {
+            this._publishHandlers[bucketName] = true;
+            return;
+        }
         if (!bucketName || typeof bucketName !== 'string') {
             throw new Error('Missing name in bucket publication!');
         }
@@ -122,7 +120,7 @@ class Buckets {
                     connection: this.connection
                 };
                 let _waitOnReady = false;
-                ctx.ready = () => _waitOnReady = false;
+                ctx.ready = () => {_waitOnReady = false};
                 ctx._willBeAsync = () => {
                     _waitOnReady = true;
                     this.unblock();
@@ -662,9 +660,6 @@ class Bucket {
                 }
                 this._buckets = defaultBuckets;
             }
-        }
-        if (Meteor.isClient) {
-            delete this['publish'];
         }
     }
 
