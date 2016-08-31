@@ -150,6 +150,10 @@ class Buckets {
         this._publishHandlers[bucketName] = true;
     }
 
+    _callMethod ({_name, subscriptionHash}, ...params) {
+        return this._connection.call('bucketsLoad' + BUCKET_SEP + _name, subscriptionHash, ...params);
+    }
+
     subscribe(bucketName, ...params) {
         if (!bucketName || typeof bucketName !== 'string') {
             throw new Error('Missing name in bucket subscription!');
@@ -308,7 +312,7 @@ class Buckets {
         _activateSubs(this, fakeHandler);
         addDocsApi(fakeHandler, this, bucketName);
         addAutoApi(fakeHandler, this, Promise.resolve(fakeHandler));
-        let refreshBucket = () => new Promise((resolve, reject) => Meteor.call('bucketsLoad' + BUCKET_SEP + bucketName, hash, ...params,
+        let refreshBucket = () => new Promise((resolve, reject) => this._callMethod(fakeHandler, ...params,
             (err, data) => {
                 if (err) {
                     deactivate(err, fakeHandler, this);
@@ -352,6 +356,7 @@ class Buckets {
                     fakeHandler._deps.changed();
                 }
             }));
+
         fakeHandler.refresh = (silent = true) => {
             _activateSubs(this, fakeHandler);
             fakeHandler._ready = false;
@@ -360,6 +365,7 @@ class Buckets {
             }
             return Object.assign(refreshBucket(), fakeHandler);
         };
+
         return Object.assign(refreshBucket(), fakeHandler);
     }
 
@@ -686,3 +692,4 @@ function isCursor(c) {
 
 export default Bucket;
 export {Buckets, Bucket};
+export const _helpers = {filterCursors, getTransportName, getHashFromParams, isCursor};
