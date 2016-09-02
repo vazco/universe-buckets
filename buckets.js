@@ -154,13 +154,17 @@ class Buckets {
         return this._connection.call('bucketsLoad' + BUCKET_SEP + _name, subscriptionHash, ...params);
     }
 
+    _subscribePublication (...params) {
+        return this._connection.subscribe(...params);
+    }
+
     subscribe(bucketName, ...params) {
         if (!bucketName || typeof bucketName !== 'string') {
             throw new Error('Missing name in bucket subscription!');
         }
         const {callbacks, readyPromise, stopPromise, context} = addPromisesApi(params, this);
         const hash = getHashFromParams(bucketName, ...params);
-        const handler = this._connection.subscribe(bucketName, hash, ...params, callbacks);
+        const handler = this._subscribePublication(bucketName, hash, ...params, callbacks);
         handler._name = bucketName;
         handler.isStatic = false;
         handler.subscriptionHash = hash;
