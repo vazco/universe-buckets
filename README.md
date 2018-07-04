@@ -1,4 +1,4 @@
-<a href="http://unicms.io"><img src="http://unicms.io/banners/standalone.png" /></a>
+<a href="http://vazco.eu"><img src="http://vazco.eu/banners/standalone.png" /></a>
 
 # Universe Buckets
 This package provides possibility of publishing documents
