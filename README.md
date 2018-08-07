@@ -1,6 +1,13 @@
-<a href="http://vazco.eu"><img src="https://vazco.eu/universe-banner.png" /></a>
+<h1 align="center">
+    <a href="https://github.com/vazco">vazco</a>/Universe Buckets
+</h1>
 
-# Universe Buckets
+&nbsp;
+
+<a href="http://vazco.eu" target="_blank"><img src="https://vazco.eu/universe-banner.png" /></a>
+
+&nbsp;
+
 This package provides possibility of publishing documents
 from various collections to bucket (sandbox).
 The biggest benefit of using this package is that
@@ -184,4 +191,8 @@ witch is same for subscription of buckets with the same parameters.
 ### Creation of collections of buckets
 > to be continued soon
 
-License MIT
+## License
+
+<img src="https://vazco.eu/banner.png" align="right">
+
+**Like every package maintained by [Vazco](https://vazco.eu/), Universe Buckets is [MIT licensed](https://github.com/vazco/uniforms/blob/master/LICENSE).**
